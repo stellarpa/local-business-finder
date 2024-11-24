@@ -1,0 +1,156 @@
+"""
+Local Business Finder
+---------------------
+This script uses the Google Maps Geocoding and Places APIs to locate businesses based on a ZIP code and customizable search keywords. 
+The results include business names, addresses, and review counts, which are exported to a CSV file for further analysis.
+
+Key Features:
+- Converts ZIP codes into latitude and longitude coordinates.
+- Searches for businesses within a defined radius using various keywords.
+- Supports paginated API results and adheres to Google Maps API rate limits.
+- Outputs results into a structured CSV file.
+
+Prerequisites:
+- Python 3.x installed.
+- A valid Google Maps API key with access to Geocoding and Places APIs.
+- Necessary Python libraries (`requests`, `pandas`, `os`, `time`) installed.
+
+Repository Instructions:
+- Clone this repository to your local machine.
+- Replace the placeholder `api_key` with your valid Google Maps API key.
+- Modify the `zip_code`, `radius`, or `keywords` list as needed for your use case.
+- Run the script to generate a CSV file containing business details.
+
+Author: Andray Gorban
+"""
+
+import requests
+import pandas as pd
+import os
+import time
+
+# Function to retrieve latitude and longitude for a given ZIP code
+def get_lat_long(zip_code, api_key):
+    """
+    Retrieves latitude and longitude for a given ZIP code using the Google Maps Geocoding API.
+
+    Parameters:
+        zip_code (str): The ZIP code to geocode.
+        api_key (str): Your Google Maps API key.
+
+    Returns:
+        tuple: Latitude and longitude of the ZIP code.
+
+    Raises:
+        Exception: If the API request fails or returns an error.
+    """
+    geocode_url = f'https://maps.googleapis.com/maps/api/geocode/json?address={zip_code}&key={api_key}'
+    response = requests.get(geocode_url)
+    results = response.json()
+
+    if results['status'] == 'OK':
+        location = results['results'][0]['geometry']['location']
+        return location['lat'], location['lng']
+    else:
+        raise Exception(
+            f"Error retrieving coordinates for ZIP code: {results['status']} - {results.get('error_message', 'No error message')}"
+        )
+
+# Function to retrieve businesses near a location based on a keyword
+def get_businesses(lat, lng, radius, api_key, keyword):
+    """
+    Searches for businesses near a given location using the Google Maps Places API.
+
+    Parameters:
+        lat (float): Latitude of the search location.
+        lng (float): Longitude of the search location.
+        radius (int): Search radius in meters.
+        api_key (str): Your Google Maps API key.
+        keyword (str): The keyword to search for.
+
+    Returns:
+        list: A list of businesses matching the keyword.
+    """
+    all_businesses = []
+    places_url = f'https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius={radius}&keyword={keyword}&key={api_key}'
+
+    while places_url:
+        response = requests.get(places_url)
+        result = response.json()
+
+        if 'results' in result:
+            all_businesses.extend(result['results'])
+
+        # Check for next page token to fetch more results
+        next_page_token = result.get('next_page_token')
+        if next_page_token:
+            time.sleep(2)  # Wait to prevent throttling
+            places_url = f'https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken={next_page_token}&key={api_key}'
+        else:
+            places_url = None
+
+    return all_businesses
+
+# Main function to run the business search workflow
+def main(zip_code, radius, api_key):
+    """
+    Main function to execute the business search and save results to a CSV file.
+
+    Parameters:
+        zip_code (str): The ZIP code to search around.
+        radius (int): Search radius in meters.
+        api_key (str): Your Google Maps API key.
+    """
+    try:
+        # Get latitude and longitude for the ZIP code
+        lat, lng = get_lat_long(zip_code, api_key)
+
+        # Define a list of keywords to search for
+        keywords = [
+            "landscaping", "lawn care", "hardscaping", "landscapes", "hardscape", "hardscaper",
+            "landscaper", "landscapers", "lawn", "mowing", "turf", "green", "grass"
+        ]
+
+        # Initialize a list to store data for all businesses
+        business_list = []
+
+        # Search for businesses using each keyword
+        for keyword in keywords:
+            businesses = get_businesses(lat, lng, radius, api_key, keyword)
+
+            # Extract relevant details for each business
+            for business in businesses:
+                name = business['name']
+                address = business.get('vicinity', 'No address provided')
+                review_count = business.get('user_ratings_total', 0)
+
+                # Append the business details to the list
+                business_list.append({
+                    'Business Name': name,
+                    'Address': address,
+                    'Review Count': review_count
+                })
+
+        # Create a pandas DataFrame to organize the data
+        df = pd.DataFrame(business_list)
+
+        # Save the results to a CSV file
+        output_dir = ''  # Update to your desired directory
+        os.makedirs(output_dir, exist_ok=True)  # Ensure the folder exists
+        output_file = os.path.join(output_dir, '16509_Landscaping_Results_100km.csv') # Modify to your preferred filename
+        df.to_csv(output_file, index=False)
+        print(f'Data exported successfully to {output_file} with {len(business_list)} entries.')
+
+    except Exception as e:
+        # Handle and display any errors that occur during execution
+        print(f'An error occurred: {e}')
+
+# Entry point for the script
+if __name__ == "__main__":
+    # Replace with your ZIP code and radius in meters (e.g., 100000 for 100 km)
+    zip_code = "16509"  # Target ZIP code
+    radius = 100000  # Search radius in meters (100 km)
+    api_key = ""  # Replace with your Google Maps API key
+
+    # Run the main function
+    main(zip_code, radius, api_key)
